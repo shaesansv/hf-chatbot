@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Send,
   Paperclip,
@@ -39,6 +39,9 @@ const Index = () => {
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const [irrelevantCount, setIrrelevantCount] = useState(0);
+const [awaitingSupportConfirmation, setAwaitingSupportConfirmation] = useState(false);
+
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -57,88 +60,247 @@ const Index = () => {
     "Payroll inquiry",
   ];
 
-  const handleSendMessage = async () => {
-    if (!newMessage.trim()) return;
+const handleSendMessage = async () => {
+  if (!newMessage.trim()) return;
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: newMessage,
-      sender: "user",
-      timestamp: new Date(),
-      status: "sending",
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setNewMessage("");
-    setIsTyping(true);
-
-    // Update message status to sent
-    setTimeout(() => {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === userMessage.id ? { ...msg, status: "sent" } : msg
-        )
-      );
-    }, 500);
-
-    // Simulate API call to HR backend
-    try {
-      const response = await simulateHRApiCall(newMessage);
-
-      setTimeout(() => {
-        setIsTyping(false);
-        const botMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          content: response,
+  // If awaiting support confirmation, handle yes/no here
+  if (awaitingSupportConfirmation) {
+    const userReply = newMessage.trim().toLowerCase();
+    if (userReply === "yes") {
+      // Redirect or trigger support connection here
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          content: "Connecting you to our support team...",
           sender: "bot",
           timestamp: new Date(),
           status: "delivered",
-        };
-        setMessages((prev) => [...prev, botMessage]);
+        },
+      ]);
+      // Reset irrelevant count and awaiting state
+      setIrrelevantCount(0);
+      setAwaitingSupportConfirmation(false);
 
-        // Update user message to delivered
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === userMessage.id ? { ...msg, status: "delivered" } : msg
-          )
-        );
-      }, 1500);
-    } catch (error) {
-      setIsTyping(false);
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === userMessage.id ? { ...msg, status: "error" } : msg
-        )
-      );
-      toast({
-        title: "Connection Error",
-        description: "Failed to connect to HR system. Please try again.",
-        variant: "destructive",
-      });
+      // TODO: Replace below with your actual redirect or support connection logic
+      console.log("Redirecting to support team...");
+    } else if (userReply === "no") {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          content: "Okay, please continue asking your HR questions.",
+          sender: "bot",
+          timestamp: new Date(),
+          status: "delivered",
+        },
+      ]);
+      setIrrelevantCount(0);
+      setAwaitingSupportConfirmation(false);
+    } else {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: Date.now().toString(),
+          content: 'Please answer "yes" or "no". Would you like to connect to our support team?',
+          sender: "bot",
+          timestamp: new Date(),
+          status: "delivered",
+        },
+      ]);
     }
+
+    setNewMessage("");
+    return;
+  }
+
+  const userMessage: Message = {
+    id: Date.now().toString(),
+    content: newMessage,
+    sender: "user",
+    timestamp: new Date(),
+    status: "sending",
   };
 
-  const simulateHRApiCall = async (message: string): Promise<string> => {
+  setMessages((prev) => [...prev, userMessage]);
+  setNewMessage("");
+  setIsTyping(true);
+
+  setTimeout(() => {
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === userMessage.id ? { ...msg, status: "sent" } : msg
+      )
+    );
+  }, 500);
+
+  try {
+    const { text: response, irrelevant } = await simulateHRApiCall(newMessage);
+
+    setTimeout(() => {
+      setIsTyping(false);
+      const botMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: response,
+        sender: "bot",
+        timestamp: new Date(),
+        status: "delivered",
+      };
+      setMessages((prev) => [...prev, botMessage]);
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === userMessage.id ? { ...msg, status: "delivered" } : msg
+        )
+      );
+
+      if (irrelevant) {
+        setIrrelevantCount((count) => count + 1);
+      } else {
+        setIrrelevantCount(0);
+      }
+
+      // After 3 irrelevant responses, prompt user
+      if (irrelevantCount + 1 >= 3) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 2).toString(),
+            content: "I can't understand. Would you like to connect to our support team? (yes/no)",
+            sender: "bot",
+            timestamp: new Date(),
+            status: "delivered",
+          },
+        ]);
+        setAwaitingSupportConfirmation(true);
+        setIrrelevantCount(0); // reset count after prompt
+      }
+    }, 1500);
+  } catch (error) {
+    setIsTyping(false);
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === userMessage.id ? { ...msg, status: "error" } : msg
+      )
+    );
+    toast({
+      title: "Connection Error",
+      description: "Failed to connect to HR system. Please try again.",
+      variant: "destructive",
+    });
+  }
+};
+
+
+  const simulateHRApiCall = async (message: string): Promise<{ text: string; irrelevant: boolean }> => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
-
+  
     const lowerMessage = message.toLowerCase();
-
-    // Find the first response where any keyword matches
+  
     const matchedResponse = hrResponses.responses.find((response) =>
       response.keywords.some((keyword) => lowerMessage.includes(keyword))
     );
-
+  
     if (matchedResponse) {
-      return matchedResponse.response;
+      return { text: matchedResponse.response, irrelevant: false };
     }
-
-    // Use the default response if no match found
-    return hrResponses.defaultResponse.replace("{message}", message);
+  
+    const defaultText = hrResponses.defaultResponse.replace("{message}", message);
+    return { text: defaultText, irrelevant: true };
   };
+  
 
   const handleQuickAction = (action: string) => {
     setNewMessage(action);
+    
+    setTimeout(() => {
+      handleSendMessageDirect(action);
+    }, 100); 
   };
+
+  const handleSendMessageDirect = async (messageContent: string) => {
+  if (!messageContent.trim()) return;
+
+  const userMessage: Message = {
+    id: Date.now().toString(),
+    content: messageContent,
+    sender: "user",
+    timestamp: new Date(),
+    status: "sending",
+  };
+
+  setMessages((prev) => [...prev, userMessage]);
+  setNewMessage("");
+  setIsTyping(true);
+
+  setTimeout(() => {
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === userMessage.id ? { ...msg, status: "sent" } : msg
+      )
+    );
+  }, 500);
+
+  try {
+    const { text, irrelevant } = await simulateHRApiCall(newMessage);
+  
+    setTimeout(() => {
+      setIsTyping(false);
+  
+      const botMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: text,
+        sender: "bot",
+        timestamp: new Date(),
+        status: "delivered",
+      };
+  
+      setMessages((prev) => [...prev, botMessage]);
+  
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === userMessage.id ? { ...msg, status: "delivered" } : msg
+        )
+      );
+  
+      if (irrelevant) {
+        setIrrelevantCount((count) => count + 1);
+      } else {
+        setIrrelevantCount(0);
+      }
+  
+      if (irrelevantCount + 1 >= 3) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: (Date.now() + 2).toString(),
+            content:
+              "I can't understand. Would you like to connect to our support team? (yes/no)",
+            sender: "bot",
+            timestamp: new Date(),
+            status: "delivered",
+          },
+        ]);
+        setAwaitingSupportConfirmation(true);
+        setIrrelevantCount(0);
+      }
+    }, 1500); // Make sure this closing parenthesis and semicolon are here
+  } catch (error) {
+    setIsTyping(false);
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === userMessage.id ? { ...msg, status: "error" } : msg
+      )
+    );
+    toast({
+      title: "Connection Error",
+      description: "Failed to connect to HR system. Please try again.",
+      variant: "destructive",
+    });
+  }
+};
+
+  
 
   const getStatusIcon = (status: Message["status"]) => {
     switch (status) {
@@ -156,190 +318,174 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-teal-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-4xl mx-auto px-4 py-4">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-gradient-to-r from-blue-600 to-teal-600 rounded-xl flex items-center justify-center">
-              <Bot className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-xl font-semibold text-gray-900">
-                HR Assistant
-              </h1>
-              <p className="text-sm text-gray-600">
-                Your intelligent HR support companion
-              </p>
-            </div>
-            <div className="ml-auto">
-              <Badge
-                variant="secondary"
-                className="bg-green-100 text-green-800"
-              >
-                Connected to HR API
-              </Badge>
-            </div>
-          </div>
-        </div>
+<div className="min-h-screen bg-gradient-to-br from-indigo-100 via-cyan-50 to-teal-100">
+  <div className="max-w-4xl mx-auto px-6 py-8">
+
+    {/* --- Header moved here above chat box --- */}
+    <div className="mb-6 bg-white border border-gray-300 rounded-2xl shadow-md px-6 py-5 flex items-center space-x-4">
+      <div className="w-12 h-12 bg-gradient-to-r from-indigo-700 to-cyan-600 rounded-2xl flex items-center justify-center shadow-lg">
+        <Bot className="w-7 h-7 text-white" />
       </div>
-
-      <div className="max-w-4xl mx-auto px-4 py-6">
-        <Card className="h-[600px] flex flex-col shadow-lg">
-          {/* Chat Messages */}
-          <ScrollArea className="flex-1 p-4">
-            <div className="space-y-4">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`flex ${
-                    message.sender === "user" ? "justify-end" : "justify-start"
-                  }`}
-                >
-                  <div
-                    className={`flex items-start space-x-2 max-w-[80%] ${
-                      message.sender === "user"
-                        ? "flex-row-reverse space-x-reverse"
-                        : ""
-                    }`}
-                  >
-                    <div
-                      className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                        message.sender === "user"
-                          ? "bg-blue-600"
-                          : "bg-gradient-to-r from-teal-500 to-blue-500"
-                      }`}
-                    >
-                      {message.sender === "user" ? (
-                        <User className="w-4 h-4 text-white" />
-                      ) : (
-                        <Bot className="w-4 h-4 text-white" />
-                      )}
-                    </div>
-                    <div
-                      className={`px-4 py-3 rounded-2xl ${
-                        message.sender === "user"
-                          ? "bg-blue-600 text-white"
-                          : "bg-gray-100 text-gray-900"
-                      }`}
-                    >
-                      <p className="text-sm leading-relaxed">
-                        {message.content}
-                      </p>
-                      <div className="flex items-center justify-between mt-2">
-                        <span
-                          className={`text-xs ${
-                            message.sender === "user"
-                              ? "text-blue-100"
-                              : "text-gray-800"
-                          }`}
-                        >
-                          {message.timestamp.toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </span>
-                        {message.sender === "user" && (
-                          <div className="ml-2">
-                            {getStatusIcon(message.status)}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-
-              {isTyping && (
-                <div className="flex justify-start">
-                  <div className="flex items-start space-x-2 max-w-[80%]">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-r from-teal-500 to-blue-500 flex items-center justify-center">
-                      <Bot className="w-4 h-4 text-white" />
-                    </div>
-                    <div className="px-4 py-3 bg-gray-100 rounded-2xl">
-                      <div className="flex space-x-1">
-                        <div className="w-2 h-2 bg-gray-700 rounded-full animate-bounce"></div>
-                        <div
-                          className="w-2 h-2 bg-gray-700 rounded-full animate-bounce"
-                          style={{ animationDelay: "0.1s" }}
-                        ></div>
-                        <div
-                          className="w-2 h-2 bg-gray-700 rounded-full animate-bounce"
-                          style={{ animationDelay: "0.2s" }}
-                        ></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-            <div ref={messagesEndRef} />
-          </ScrollArea>
-
-          {/* Quick Actions */}
-          <div className="px-4 py-2 border-t border-gray-100">
-            <div className="flex flex-wrap gap-2">
-              {quickActions.map((action, index) => (
-                <Button
-                  key={index}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleQuickAction(action)}
-                  className="text-xs hover:bg-blue-50 hover:border-blue-300 transition-all duration-200"
-                >
-                  {action}
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          {/* Message Input */}
-          <div className="p-4 border-t border-gray-100">
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 hover:bg-gray-50"
-              >
-                <Paperclip className="w-4 h-4" />
-              </Button>
-              <Input
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
-                placeholder="Type your HR question here..."
-                className="flex-1 border-gray-200 focus:border-blue-400 focus:ring-blue-400"
-              />
-              <Button
-                onClick={handleSendMessage}
-                disabled={!newMessage.trim() || isTyping}
-                className="shrink-0 bg-gradient-to-r from-blue-600 to-teal-600 hover:from-blue-700 hover:to-teal-700 transition-all duration-200"
-              >
-                <Send className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-        </Card>
-
-        {/* Features Footer */}
-        <div className="mt-6 text-center">
-          <p className="text-sm text-gray-600 mb-2">
-            🔒 Secure HR API Integration • 🤖 AI-Powered Responses • 📱 Mobile
-            Friendly
-          </p>
-          {/* <div className="flex justify-center space-x-4 text-xs text-gray-500">
-            <span>Employee Services</span>
-            <span>•</span>
-            <span>Leave Management</span>
-            <span>•</span>
-            <span>Payroll Support</span>
-            <span>•</span>
-            <span>IT Helpdesk</span>
-          </div> */}
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold text-indigo-900">HR Assistant</h1>
+        <p className="text-sm text-cyan-700 font-medium">
+          Your intelligent HR support companion
+        </p>
+      </div>
+      <div className="ml-auto">
+        <Badge
+          variant="secondary"
+          className="bg-green-200 text-green-900 font-semibold shadow-inner"
+        >
+          Connected to HR API
+        </Badge>
       </div>
     </div>
+
+    {/* Chat Card */}
+    <Card className="h-[600px] flex flex-col shadow-xl rounded-3xl border border-indigo-200">
+      {/* Chat Messages */}
+      <ScrollArea className="flex-1 p-6 bg-white rounded-3xl shadow-inner">
+        <div className="space-y-5">
+          {messages.map((message) => (
+            <div
+              key={message.id}
+              className={`flex ${
+                message.sender === "user" ? "justify-end" : "justify-start"
+              }`}
+            >
+              <div
+                className={`flex items-start space-x-3 max-w-[80%] ${
+                  message.sender === "user"
+                    ? "flex-row-reverse space-x-reverse"
+                    : ""
+                }`}
+              >
+                <div
+                  className={`w-10 h-10 rounded-full flex items-center justify-center shadow-md ${
+                    message.sender === "user"
+                      ? "bg-indigo-700"
+                      : "bg-gradient-to-r from-cyan-500 to-indigo-600"
+                  }`}
+                >
+                  {message.sender === "user" ? (
+                    <User className="w-5 h-5 text-white" />
+                  ) : (
+                    <Bot className="w-5 h-5 text-white" />
+                  )}
+                </div>
+                <div
+                  className={`px-5 py-4 rounded-3xl shadow-lg ${
+                    message.sender === "user"
+                      ? "bg-indigo-700 text-white"
+                      : "bg-gray-100 text-indigo-900"
+                  }`}
+                >
+                  <p className="text-base leading-relaxed font-sans">
+                    {message.content}
+                  </p>
+                  <div className="flex items-center justify-between mt-3">
+                    <span
+                      className={`text-xs font-mono ${
+                        message.sender === "user"
+                          ? "text-indigo-300"
+                          : "text-indigo-700"
+                      }`}
+                    >
+                      {message.timestamp.toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    {message.sender === "user" && (
+                      <div className="ml-3">{getStatusIcon(message.status)}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {isTyping && (
+            <div className="flex justify-start">
+              <div className="flex items-start space-x-3 max-w-[80%]">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-r from-cyan-600 to-indigo-700 flex items-center justify-center shadow-md">
+                  <Bot className="w-5 h-5 text-white" />
+                </div>
+                <div className="px-5 py-4 bg-gray-100 rounded-3xl shadow-lg">
+                  <div className="flex space-x-2">
+                    <div className="w-3 h-3 bg-indigo-800 rounded-full animate-bounce"></div>
+                    <div
+                      className="w-3 h-3 bg-indigo-800 rounded-full animate-bounce"
+                      style={{ animationDelay: "0.15s" }}
+                    ></div>
+                    <div
+                      className="w-3 h-3 bg-indigo-800 rounded-full animate-bounce"
+                      style={{ animationDelay: "0.3s" }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        <div ref={messagesEndRef} />
+      </ScrollArea>
+
+      {/* Quick Actions */}
+      <div className="px-6 py-3 border-t border-indigo-100 bg-indigo-50 rounded-b-3xl">
+        <div className="flex flex-wrap gap-3">
+          {quickActions.map((action, index) => (
+            <Button
+              key={index}
+              variant="outline"
+              size="sm"
+              onClick={() => handleQuickAction(action)}
+              className="text-sm text-indigo-700 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all duration-300 rounded-lg"
+            >
+              {action}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {/* Message Input */}
+      <div className="p-6 border-t border-indigo-100 bg-white rounded-b-3xl">
+        <div className="flex items-center space-x-3">
+          <Button
+          type="file"
+            variant="outline"
+            size="sm"
+            className="shrink-0 hover:bg-indigo-50 border-indigo-300"
+          >
+            <Paperclip className="w-5 h-5 text-indigo-700" />
+          </Button>
+          <Input
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
+            placeholder="Type your HR question here..."
+            className="flex-1 border-indigo-300 focus:border-indigo-500 focus:ring-indigo-400 rounded-lg"
+          />
+          <Button
+            onClick={handleSendMessage}
+            disabled={!newMessage.trim() || isTyping}
+            className="shrink-0 bg-gradient-to-r from-indigo-700 to-cyan-600 hover:from-indigo-800 hover:to-cyan-700 transition-all duration-300 rounded-lg"
+          >
+            <Send className="w-5 h-5 text-white" />
+          </Button>
+        </div>
+      </div>
+    </Card>
+
+    {/* Features Footer */}
+    <div className="mt-8 text-center">
+      <p className="text-sm text-indigo-600 font-semibold mb-3">
+        🔒 Secure HR API Integration • 🤖 AI-Powered Responses • 📱 Mobile Friendly
+      </p>
+    </div>
+  </div>
+</div>
   );
 };
-
 export default Index;
