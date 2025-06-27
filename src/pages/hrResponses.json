@@ -1,0 +1,25 @@
+{
+  "responses": [
+    {
+      "keywords": ["leave", "vacation"],
+      "response": "I can help you with leave requests! Your current leave balance is 15 days. Would you like me to help you submit a new leave request or check your leave history?"
+    },
+    {
+      "keywords": ["payroll", "salary"],
+      "response": "For payroll inquiries, I can provide information about pay dates, tax documents, and deductions. Your next pay date is March 15th. What specific payroll information do you need?"
+    },
+    {
+      "keywords": ["expense", "report"],
+      "response": "I can guide you through the expense reporting process. You can submit receipts for business expenses, travel costs, and office supplies. Would you like me to start a new expense report for you?"
+    },
+    {
+      "keywords": ["policy", "handbook"],
+      "response": "I have access to all company policies and the employee handbook. What specific policy information are you looking for? I can help with HR policies, IT policies, or benefits information."
+    },
+    {
+      "keywords": ["it", "support"],
+      "response": "For IT support, I can help you with password resets, software access requests, and hardware issues. I'll create a support ticket for you. What technical issue are you experiencing?"
+    }
+  ],
+  "defaultResponse": "I understand you're asking about: '{message}'. Let me connect to our HR system to get you the most accurate information. Is this related to benefits, payroll, leave management, or employee services?"
+}
